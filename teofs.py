@@ -2,14 +2,6 @@ from Passthrough import Passthrough
 import os
 import subprocess
 
-def encrypt(fr):
-	#arriva il contenuto del file
-	result="";
-	for i in range(len(fr)):
-		char = fr[i] #codice ASCII
-		result += chr(char+1)
-	return result
-
 
 class teofs(Passthrough):
 	def __init__(self,root):
@@ -26,14 +18,9 @@ class teofs(Passthrough):
 		print(f_readed)
 	
 	#Definisco un metodo che cifri il contenuto del file
-	def open_encrypt(self,path,flags,size):
-		self.flags=flags
-		self.path=path
-		f_opened = super().open(path,flags)
-		f_readed = os.read(f_opened,size)
-		subprocess.run(['mixslice','encrypt',"./TBM/cavia.txt"])
-		#f_modified = encrypt(f_readed)
-		
+	def encrypt(self,path):
+		subprocess.run(['mixslice','encrypt',path])
+	#Definisco un metodo che decifri il contento della cartella contenente i datagrammi e ricostruisca il plaintext
 	def decrypt(self,path):
 		subprocess.run(["mixslice","decrypt",path])
 		
@@ -47,10 +34,11 @@ class teofs(Passthrough):
 	
 demo = teofs("/")
 #demo.open_read("home/matteo/Desktop/Tesi/TBM/cavia.txt",os.O_RDONLY,500000)
-demo.open_encrypt("home/matteo/Desktop/Tesi/TBM/cavia.txt",os.O_RDWR,500000)
+demo.encrypt("/home/matteo/Desktop/Tesi/TBM/cavia.txt")
 print("ho crittato")
-demo.decrypt("TBM/cavia.txt.enc")
+demo.decrypt("/home/matteo/Desktop/Tesi/TBM/cavia.txt.enc")
 print("ho decrittato")
+subprocess.run(["cat","TBM/cavia.txt.enc.dec"])
 #demo.create_file("home/matteo/Desktop/Tesi/TBM/appCreato.txt",0o777)
 #demo.delete_file("home/matteo/Desktop/Tesi/TBM/appCreato.txt")
 
