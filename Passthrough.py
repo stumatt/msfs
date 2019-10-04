@@ -129,9 +129,9 @@ class Passthrough(Operations):
 #IL CODICE CHE SEGUE PERMETTE DI LANCIARE LO SCRIPT E QUINDI DI FAR FUNZIONARE IL PARAMETRO MOUNTPOINT COME MIRROR DEL PARAMETRO 
 def main(mountpoint, root):
     FUSE(Passthrough(root), mountpoint, nothreads=True, foreground=True)
+   
 
 if __name__ == '__main__':
     main(sys.argv[2], sys.argv[1])
     
-#teofs = Passthrough("/")
-#teofs.rmdir("home/matteo/Desktop/Tesi/TBM/Ciao")
+
