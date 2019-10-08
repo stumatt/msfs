@@ -1,9 +1,8 @@
 #!/usr/bin/env python
-#mod 
 
 from __future__ import with_statement
 
-import os #to import os method like mkdir,rmdir.....
+import os
 import sys
 import errno
 
@@ -11,7 +10,7 @@ from fuse import FUSE, FuseOSError, Operations
 
 
 class Passthrough(Operations):
-    def __init__(self, root): #l'unico parametro richiesto e' la radice del percorso, quindi "/"
+    def __init__(self, root):
         self.root = root
 
     # Helpers
@@ -126,12 +125,9 @@ class Passthrough(Operations):
     def fsync(self, path, fdatasync, fh):
         return self.flush(path, fh)
 
-#IL CODICE CHE SEGUE PERMETTE DI LANCIARE LO SCRIPT E QUINDI DI FAR FUNZIONARE IL PARAMETRO MOUNTPOINT COME MIRROR DEL PARAMETRO 
+
 def main(mountpoint, root):
     FUSE(Passthrough(root), mountpoint, nothreads=True, foreground=True)
-   
 
 if __name__ == '__main__':
     main(sys.argv[2], sys.argv[1])
-    
-

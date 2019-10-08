@@ -1,6 +1,5 @@
 from Passthrough import Passthrough
 import os
-import subprocess
 from aesmix import mixencrypt, mixdecrypt
 from aesmix import t_mixencrypt, t_mixdecrypt
 from aesmix import keyreg
@@ -28,40 +27,43 @@ class msfs(Passthrough):
 	
 	#Definisco un metodo che cifri il contenuto del file
 	def encrypt(self,path):
-		key = b"k" * 16 #AGGIUNGERE GENERAZIONE CASUALE
-		iv = b"i" * 16  #AGGIUNGERE GENERAZIONE CASUALE
-		base = os.path.basename(path)
-		output = base+".enc"       
-		public = base+".public"
-		private = base+".private"
-		print(output)
+		key = os.urandom(16)
+		iv = os.urandom(16) 
+		output = path+".enc"       
+		public = path+".public"
+		private = path+".private"
 		with open(path,"rb") as f_opened:
 			data = f_opened.read()
-		print(data)
+		print("Encrypting file %s ..." %path)
 		manager = MixSlice.encrypt(data, key, iv)
 		manager.save_to_files(output,public,private) #COME GENERA LE CHIAVI
-
+		print("Output fragdir: %s" % output)
+		print("Public key file:  %s" % public)
+		print("Private key file: %s" % private)
 		
+	#Definisco un metodo che faccia policy update	
 	def update(self,fragpath):
-		base = os.path.basename(fragpath)
-		public = base.replace(".enc",".public")
-		private = base.replace(".enc",".private")
+		public = fragpath.replace(".enc",".public")
+		private = fragpath.replace(".enc",".private")
+		print("Performing policy update on %s ..." %fragpath)
 		manager = MixSlice.load_from_file(fragpath,private)
 		manager.step_encrypt()
 		manager.save_to_files(fragpath,public,private)
+		print("Done")
 		
-		
-		
+				
     #Definisco un metodo che decifri il contento della cartella contenente i datagrammi e ricostruisca il plaintext
 	def decrypt(self,fragpath):
-		base = os.path.basename(fragpath) 
-		keyfile = (base.replace(".enc",".public") if os.path.isfile(base.replace(".enc",".public")) else base.replace(".enc",".private"))
+		keyfile = (fragpath.replace(".enc",".public") if os.path.isfile(fragpath.replace(".enc",".public")) else fragpath.replace(".enc",".private"))
 		assert os.path.isfile(keyfile), "key file not valid"
-		output = base+".dec"
+		print("Decrypting fragdir %s using key %s ..." %
+                 (fragpath, keyfile))
+		output = fragpath+".dec"
 		manager = MixSlice.load_from_file(fragpath,keyfile)
 		plaindata = manager.decrypt()
 		with open(output,"wb") as fp:
 			fp.write(plaindata)
+		print("Decrypted file: %s" % output)
 	
 		
 		
