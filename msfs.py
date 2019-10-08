@@ -28,11 +28,12 @@ class msfs(Passthrough):
 	
 	#Definisco un metodo che cifri il contenuto del file
 	def encrypt(self,path):
-		key = b"k" * 16
-		iv = b"i" * 16
-		output = path[-9:]+".enc"       #FUNZIONA PER CAVIA.TXT
-		public = path[-9:]+".public"
-		private = path[-9:]+".private"
+		key = b"k" * 16 #AGGIUNGERE GENERAZIONE CASUALE
+		iv = b"i" * 16  #AGGIUNGERE GENERAZIONE CASUALE
+		base = os.path.basename(path)
+		output = base+".enc"       
+		public = base+".public"
+		private = base+".private"
 		print(output)
 		with open(path,"rb") as f_opened:
 			data = f_opened.read()
@@ -42,8 +43,10 @@ class msfs(Passthrough):
 
     #Definisco un metodo che decifri il contento della cartella contenente i datagrammi e ricostruisca il plaintext
 	def decrypt(self,fragpath):
-		keyfile = fragpath[-13:-4]+".private"
-		output = fragpath[-13:]+".dec"
+		base = os.path.basename(fragpath) 
+		keyfile = (base.replace(".enc",".public") if os.path.isfile(base.replace(".enc",".public")) else base.replace(".enc",".private"))
+		assert os.path.isfile(keyfile), "key file not valid"
+		output = base+".dec"
 		manager = MixSlice.load_from_file(fragpath,keyfile)
 		plaindata = manager.decrypt()
 		with open(output,"wb") as fp:
