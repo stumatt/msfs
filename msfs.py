@@ -41,6 +41,17 @@ class msfs(Passthrough):
 		manager = MixSlice.encrypt(data, key, iv)
 		manager.save_to_files(output,public,private) #COME GENERA LE CHIAVI
 
+		
+	def update(self,fragpath):
+		base = os.path.basename(fragpath)
+		public = base.replace(".enc",".public")
+		private = base.replace(".enc",".private")
+		manager = MixSlice.load_from_file(fragpath,private)
+		manager.step_encrypt()
+		manager.save_to_files(fragpath,public,private)
+		
+		
+		
     #Definisco un metodo che decifri il contento della cartella contenente i datagrammi e ricostruisca il plaintext
 	def decrypt(self,fragpath):
 		base = os.path.basename(fragpath) 
@@ -69,8 +80,8 @@ elif(scelta == '2'):
 	demo.decrypt(path)
 elif(scelta == '3'):
 	path = input("inserisci la path del file da revocare \n")
-	if path[0:8]=="/mnt/MP/":
-		demo.revaccess(path)
+	#if path[0:8]=="/mnt/MP/":
+	demo.update(path)
 elif(scelta == '4'): demo.read("/home/matteo/Desktop/Tesi/TBM/cavia.txt")	
 else: print("niente di buono \n")
 
