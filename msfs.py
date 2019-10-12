@@ -1,5 +1,9 @@
 from Passthrough import Passthrough
 import os
+from os import listdir
+from collections import namedtuple
+import tempfile
+import json
 from aesmix import mixencrypt, mixdecrypt
 from aesmix import t_mixencrypt, t_mixdecrypt
 from aesmix import keyreg
@@ -64,11 +68,66 @@ class msfs(Passthrough):
 		with open(output,"wb") as fp:
 			fp.write(plaindata)
 		print("Decrypted file: %s" % output)
+		
+	def temporize(self):
+		path = "/mnt/MP/"
+		#creo una lista contenente i nomi delle directory di frammenti nel mountpoint
+		int_dir=[]
+		int_files=[]
+		dir = [d for d in listdir(path) if os.path.isdir(os.path.join(path,d))]
+		for x in dir:
+			if(x[-4:] ==".enc"):
+				int_dir.append(x)
+		for x in int_dir:  #Decritto ogni directory
+			print(x)
+			self.decrypt(path+x)
+		allfiles = [f for f in listdir(path) if os.path.isfile(os.path.join(path,f))]
+		for x in allfiles:
+			if(x[-4:]==".dec"):
+				int_files.append(x)
+		temp_file_dict = {}	#dizionario di corrispondenza file - filetemp
+		table = [] #lista di corrispondenze files - filestemp	
+		i = 0
+		for x in int_files:
+			with open((path+x),"rb") as fr:				
+				data = fr.read()
+			temp = tempfile.NamedTemporaryFile(mode='w+b',delete=False) 
+			temp.write(data)
+			temp_file_dict['ciphertext'] = (path+x).replace(".dec","")
+			temp_file_dict['plaintext'] = temp.name
+			tablepath=path+"corrTable"
+			exTempDict = {'exTempDict':temp_file_dict}
+			#Scrivo la tabella di corrispondere tra ciphertext nel MP e file temporanei nel /tmp
+			with open(tablepath,"a") as ftable:
+				ftable.write(json.dumps(exTempDict))
+				ftable.write("\n")
+			self.delete_file(path+x)
+		
+			
+			
+		'''
+		files = [f for f in listdir(path) if os.path.isfile(os.path.join(path,f))]
+		for x in files:
+			if(x[-7:]!="private" and x[-6:]!="public"):
+				files.remove(x)
+		#A sto punto in files ho le path che mi servono quindi sposto i file delle chiavi in file temporanei /tmp/
+		temp_file_dict = {}	#dizionario di corrispondenza file - filetemp
+		table = [] #lista di corrispondenze files - filestemp
+		for x in files:
+			with open((path+x),"rb") as fr:				
+				temp_file_dict['filename'] = path+x
+				temp = tempfile.NamedTemporaryFile(mode='w+b',delete=False) 
+				temp.write(fr.read())
+				temp_file_dict['tempname'] = temp.name
+				table.append(temp_file_dict)
+		for x in table:
+			print(x)
+		'''
 	
 		
 		
-		
 demo = msfs("/")
+'''
 scelta = input("Cosa vuoi fare? \n 1: Scegli un file e cifralo \n 2: Scegli un file cifrato e decifralo \n 3: Revoca accesso a file \n 4: leggi file cavia \n")
 if(scelta == '1'):
 	path = input("inserisci la path del file da crittografare \n")
@@ -86,7 +145,8 @@ elif(scelta == '3'):
 	demo.update(path)
 elif(scelta == '4'): demo.read("/home/matteo/Desktop/Tesi/TBM/cavia.txt")	
 else: print("niente di buono \n")
-
+'''
+demo.temporize()
 
 
 
