@@ -88,10 +88,12 @@ class msfs(Passthrough):
 		temp_file_dict = {}	#dizionario di corrispondenza file - filetemp
 		table = [] #lista di corrispondenze files - filestemp	
 		i = 0
+		temp_dir = tempfile.mkdtemp()
+		temp_file_dict['Temporary plaintext directory']=temp_dir
 		for x in int_files:
 			with open((path+x),"rb") as fr:				
 				data = fr.read()
-			temp = tempfile.NamedTemporaryFile(mode='w+b',delete=False) 
+			temp = tempfile.NamedTemporaryFile(mode='w+b',delete=False, dir=temp_dir) 
 			temp.write(data)
 			temp_file_dict['ciphertext'] = (path+x).replace(".dec","")
 			temp_file_dict['plaintext'] = temp.name
@@ -158,4 +160,3 @@ demo.temporize()
 
 #demo.create_file("home/matteo/Desktop/Tesi/TBM/appCreato.txt",0o777)
 #demo.delete_file("home/matteo/Desktop/Tesi/TBM/appCreato.txt")
-
