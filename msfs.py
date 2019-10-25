@@ -146,6 +146,7 @@ class msfs(Passthrough):
 		
 demo = msfs("/")
 mppath = "/mnt/MP/" #mountpoin path
+demo.set_corrtable("/home/matteo/Desktop/")
 thread = threading.Thread(target=launchPass)
 thread.daemon = True
 thread.start()
@@ -186,4 +187,3 @@ elif(scelta == '3'):
 elif(scelta == '4'): demo.read("/home/matteo/Desktop/Tesi/TBM/cavia.txt")	
 else: print("niente di buono \n")
 '''
-

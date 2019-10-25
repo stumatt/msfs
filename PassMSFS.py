@@ -1,11 +1,13 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 from __future__ import with_statement
 
+from os import listdir
 import os
 import sys
 import errno
-
+import tempfile
+from pathlib import Path
 
 from fuse import FUSE, FuseOSError, Operations
 
@@ -18,15 +20,39 @@ class Passthrough(Operations):
     # =======
 
     def _full_path(self, partial):
-        partial = partial.lstrip("/")
+        if partial.startswith("/"):
+            partial = partial[1:]
         path = os.path.join(self.root, partial)
         return path
+    
+    def save_ct(self,ct,tempdir):
+        with open(tempdir,"w") as corrtable_file:
+            for x in ct:
+                corrtable_file.write(x)
+        
 
     # Filesystem methods
     # ==================
 
     def access(self, path, mode):
         full_path = self._full_path(path)
+        print("Sono entrato in: ",full_path)
+        if full_path == self.root:
+            toTouch = []
+            dir = [d for d in listdir(full_path) if os.path.isdir(os.path.join(full_path,d))]  #potrei aggiungere di filtrare le nonvuote
+            for x in dir:           
+                if(x[-4:]==".enc"):
+                    toTouch.append(x+".dec")
+            if toTouch:
+                temp_dir = tempfile.mkdtemp(prefix="PLAIN")
+                corrTable = ["In " + temp_dir]
+                print(temp_dir)
+                for x in toTouch:
+                    Path(temp_dir+"/"+x).touch()
+                    #corrTable.append(x.replace(".dec","")+','+x)
+                    print("ho toucchato")
+                #self.save_ct(corrTable,temp_dir);
+            
         if not os.access(full_path, mode):
             raise FuseOSError(errno.EACCES)
 
@@ -46,6 +72,7 @@ class Passthrough(Operations):
 
     def readdir(self, path, fh):
         full_path = self._full_path(path)
+        print("Ho letto il contenuto della dir: ",full_path)
 
         dirents = ['.', '..']
         if os.path.isdir(full_path):
@@ -82,13 +109,13 @@ class Passthrough(Operations):
         return os.unlink(self._full_path(path))
 
     def symlink(self, name, target):
-        return os.symlink(name, self._full_path(target))
+        return os.symlink(target, self._full_path(name))
 
     def rename(self, old, new):
         return os.rename(self._full_path(old), self._full_path(new))
 
     def link(self, target, name):
-        return os.link(self._full_path(target), self._full_path(name))
+        return os.link(self._full_path(name), self._full_path(target))
 
     def utimens(self, path, times=None):
         return os.utime(self._full_path(path), times)
@@ -98,7 +125,6 @@ class Passthrough(Operations):
 
     def open(self, path, flags):
         full_path = self._full_path(path)
-        print("CI SIAMO")
         return os.open(full_path, flags)
 
     def create(self, path, mode, fi=None):
@@ -128,8 +154,13 @@ class Passthrough(Operations):
         return self.flush(path, fh)
 
 
-def main(mountpoint, root):
-    FUSE(Passthrough(root), mountpoint, nothreads=True, foreground=True)
+def main(mountpoint, root, masterpassword):
+    pw = ''.join(open(root+"password").read().split('\n'))
+    print(pw)
+    if pw == masterpassword:
+        FUSE(Passthrough(root), mountpoint, nothreads=True, foreground=True)     
+    else:
+        print("Masterpassword sbagliata")
 
 if __name__ == '__main__':
-    main(sys.argv[2], sys.argv[1])
+    main(sys.argv[2], sys.argv[1], sys.argv[3])
