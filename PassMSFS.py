@@ -13,23 +13,32 @@ from fuse import FUSE, FuseOSError, Operations
 
 
 class Passthrough(Operations):
-    def __init__(self, root):
+    
+    
+    def __init__(self, root, mountpoint):
         self.root = root
+        self.mountpoint = mountpoint
+        self.temp_dir =""
+        self.locations = []
+        self.isfirst = True
+        self.listacorr = []
 
     # Helpers
     # =======
-
+            
     def _full_path(self, partial):
         if partial.startswith("/"):
             partial = partial[1:]
         path = os.path.join(self.root, partial)
         return path
     
-    def save_ct(self,ct,tempdir):
-        with open(tempdir,"w") as corrtable_file:
+    def save_ct(self,ct):
+        print("[*] Realizing correspondace table")
+        with open(self.temp_dir+'/corrtable',"w") as corrtable_file:
             for x in ct:
-                corrtable_file.write(x)
-        
+                corrtable_file.write(x+os.linesep)
+        print("Correspondance table available under: ",self.temp_dir+"corrtable")
+        return
 
     # Filesystem methods
     # ==================
@@ -37,21 +46,41 @@ class Passthrough(Operations):
     def access(self, path, mode):
         full_path = self._full_path(path)
         print("Sono entrato in: ",full_path)
-        if full_path == self.root:
+        #se e' il primo accesso al mountpoint, touccha i file e crea tabella di e la mette in una lista che servira a fare da medium
+        if full_path == self.root and self.isfirst == True: 
             toTouch = []
             dir = [d for d in listdir(full_path) if os.path.isdir(os.path.join(full_path,d))]  #potrei aggiungere di filtrare le nonvuote
             for x in dir:           
                 if(x[-4:]==".enc"):
                     toTouch.append(x+".dec")
             if toTouch:
-                temp_dir = tempfile.mkdtemp(prefix="PLAIN")
-                corrTable = ["In " + temp_dir]
-                print(temp_dir)
+                self.temp_dir = tempfile.mkdtemp(prefix="PLAIN")
+                corrTable = [self.mountpoint+','+self.temp_dir]
+                print(self.temp_dir)
                 for x in toTouch:
-                    Path(temp_dir+"/"+x).touch()
-                    #corrTable.append(x.replace(".dec","")+','+x)
-                    print("ho toucchato")
-                #self.save_ct(corrTable,temp_dir);
+                    Path(self.temp_dir+"/"+x).touch()
+                    corrTable.append(x.replace(".dec","")+','+x+',')
+                self.save_ct(corrTable);
+                
+            with open(self.temp_dir+"/corrtable","r") as fr:
+                self.locations = fr.readline().split(',',1) #mountpoint in locations[0], temp in locations[1]                       
+            
+            with open(self.temp_dir+"/corrtable","r") as f:
+                next(f)
+                self.listacorr = f.read().split(',')
+            
+            #a questo appunto siamo in una situazione in cui locations contiene path mountpoint e path temporanea
+            #e listacorr contiene cipher e plain uno adiacente all'altro, vanno sommati alle locations.
+                
+            self.isfirst = False 
+        
+        
+        if full_path[-4:] == ".enc":
+            cip_index = self.listacorr.index(full_path.replace(self.root,"")) 
+            print(cip_index) 
+            '''for x in self.listacorr:
+                if x == full_path
+            print("sei entrato in una fragdir, questa: ",full_path)'''
             
         if not os.access(full_path, mode):
             raise FuseOSError(errno.EACCES)
@@ -158,7 +187,7 @@ def main(mountpoint, root, masterpassword):
     pw = ''.join(open(root+"password").read().split('\n'))
     print(pw)
     if pw == masterpassword:
-        FUSE(Passthrough(root), mountpoint, nothreads=True, foreground=True)     
+        FUSE(Passthrough(root,mountpoint), mountpoint, nothreads=True, foreground=True)     
     else:
         print("Masterpassword sbagliata")
 
