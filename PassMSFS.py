@@ -1,16 +1,17 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 
 from __future__ import with_statement
 
-from os import listdir
 import os
 import sys
 import errno
+from os import listdir
 import tempfile
 from pathlib import Path
+from aesmix import MixSlice
+
 
 from fuse import FUSE, FuseOSError, Operations
-
 
 class Passthrough(Operations):
     
@@ -22,66 +23,73 @@ class Passthrough(Operations):
         self.locations = []
         self.isfirst = True
         self.listacorr = []
+        self.corrTable = []
 
     # Helpers
     # =======
-            
+
     def _full_path(self, partial):
-        if partial.startswith("/"):
-            partial = partial[1:]
+        partial = partial.lstrip("/")
         path = os.path.join(self.root, partial)
         return path
-    
-    def save_ct(self,ct):
+
+    def save_ct(self):
         print("[*] Realizing correspondace table")
         with open(self.temp_dir+'/corrtable',"w") as corrtable_file:
-            for x in ct:
-                corrtable_file.write(x+os.linesep)
-        print("Correspondance table available under: ",self.temp_dir+"corrtable")
-        return
-
+            for x in self.corrTable:
+                corrtable_file.write(x+',')
+        print("Correspondance table available under: ",self.temp_dir+"/corrtable")
+        
+    def decrypt(self,fragpath):
+        keyfile = (fragpath.replace(".enc",".public") if os.path.isfile(fragpath.replace(".enc",".public")) else fragpath.replace(".enc",".private"))
+        assert os.path.isfile(keyfile), "key file not valid"
+        print("Decrypting fragdir %s using key %s ..." %
+                 (fragpath, keyfile))
+        output = fragpath+".dec"
+        manager = MixSlice.load_from_file(fragpath,keyfile)
+        plaindata = manager.decrypt()
+        with open(output,"wb") as fp:
+            fp.write(plaindata)
+        print("Decrypted file: %s" % output)
+    
     # Filesystem methods
     # ==================
 
     def access(self, path, mode):
         full_path = self._full_path(path)
         print("Sono entrato in: ",full_path)
-        #se e' il primo accesso al mountpoint, touccha i file e crea tabella di e la mette in una lista che servira a fare da medium
+        #se e' il primo accesso al mountpoint, touccha i file e crea tabella di corrisp e la mette in una lista che servira a fare da medium
         if full_path == self.root and self.isfirst == True: 
             toTouch = []
-            dir = [d for d in listdir(full_path) if os.path.isdir(os.path.join(full_path,d))]  #potrei aggiungere di filtrare le nonvuote
+            dir = [d for d in listdir(full_path) if os.path.isdir(os.path.join(full_path,d))]  #apre e cerca in mnt/MP
             for x in dir:           
                 if(x[-4:]==".enc"):
                     toTouch.append(x+".dec")
-            if toTouch:
-                self.temp_dir = tempfile.mkdtemp(prefix="PLAIN")
-                corrTable = [self.mountpoint+','+self.temp_dir]
-                print(self.temp_dir)
-                for x in toTouch:
-                    Path(self.temp_dir+"/"+x).touch()
-                    corrTable.append(x.replace(".dec","")+','+x+',')
-                self.save_ct(corrTable);
-                
-            with open(self.temp_dir+"/corrtable","r") as fr:
-                self.locations = fr.readline().split(',',1) #mountpoint in locations[0], temp in locations[1]                       
+            if toTouch: #se c'e' almeno un directory .enc
+                self.temp_dir = tempfile.mkdtemp(prefix="PLAIN") #creo una directory temporanea
+                self.corrTable.append(self.mountpoint+','+self.temp_dir) #inizializzo la lista corrtable
+                for x in toTouch: #per ogni fragdir nel mountpoint
+                    Path(self.temp_dir+"/"+x).touch() #touccho il relativo decriptato
+                    self.corrTable.append(x.replace(".dec","")+','+x) #ne aggiungo il nome alla corrtable sia del cipher che del plain
+                self.save_ct() #salvo la corrtable in un file (INUTILE?????)
+            
+            self.isfirst = False #Questo mi permettere di fare tutto quello sopra solo al primo accesso ad MP
             
             with open(self.temp_dir+"/corrtable","r") as f:
-                next(f)
-                self.listacorr = f.read().split(',')
-            
-            #a questo appunto siamo in una situazione in cui locations contiene path mountpoint e path temporanea
-            #e listacorr contiene cipher e plain uno adiacente all'altro, vanno sommati alle locations.
-                
-            self.isfirst = False 
-        
+	            self.listacorr = (f.read().split(','))
+	            self.locations =[self.listacorr[0],self.listacorr[1]]
         
         if full_path[-4:] == ".enc":
-            cip_index = self.listacorr.index(full_path.replace(self.root,"")) 
-            print(cip_index) 
-            '''for x in self.listacorr:
-                if x == full_path
-            print("sei entrato in una fragdir, questa: ",full_path)'''
+            if full_path.replace(self.root,"") in self.listacorr:
+                self.decrypt(full_path)
+                self.listacorr.remove(full_path.replace(self.root,""))
+                print(self.listacorr)
+                print("Found")
+            else:
+                print("not found")
             
+            
+        
         if not os.access(full_path, mode):
             raise FuseOSError(errno.EACCES)
 
@@ -101,7 +109,6 @@ class Passthrough(Operations):
 
     def readdir(self, path, fh):
         full_path = self._full_path(path)
-        print("Ho letto il contenuto della dir: ",full_path)
 
         dirents = ['.', '..']
         if os.path.isdir(full_path):
@@ -138,13 +145,13 @@ class Passthrough(Operations):
         return os.unlink(self._full_path(path))
 
     def symlink(self, name, target):
-        return os.symlink(target, self._full_path(name))
+        return os.symlink(name, self._full_path(target))
 
     def rename(self, old, new):
         return os.rename(self._full_path(old), self._full_path(new))
 
     def link(self, target, name):
-        return os.link(self._full_path(name), self._full_path(target))
+        return os.link(self._full_path(target), self._full_path(name))
 
     def utimens(self, path, times=None):
         return os.utime(self._full_path(path), times)
@@ -154,6 +161,7 @@ class Passthrough(Operations):
 
     def open(self, path, flags):
         full_path = self._full_path(path)
+        print("CI SIAMO")
         return os.open(full_path, flags)
 
     def create(self, path, mode, fi=None):

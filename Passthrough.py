@@ -1,11 +1,10 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 from __future__ import with_statement
 
 import os
 import sys
 import errno
-
 
 from fuse import FUSE, FuseOSError, Operations
 
@@ -18,7 +17,8 @@ class Passthrough(Operations):
     # =======
 
     def _full_path(self, partial):
-        partial = partial.lstrip("/")
+        if partial.startswith("/"):
+            partial = partial[1:]
         path = os.path.join(self.root, partial)
         return path
 
@@ -82,13 +82,13 @@ class Passthrough(Operations):
         return os.unlink(self._full_path(path))
 
     def symlink(self, name, target):
-        return os.symlink(name, self._full_path(target))
+        return os.symlink(target, self._full_path(name))
 
     def rename(self, old, new):
         return os.rename(self._full_path(old), self._full_path(new))
 
     def link(self, target, name):
-        return os.link(self._full_path(target), self._full_path(name))
+        return os.link(self._full_path(name), self._full_path(target))
 
     def utimens(self, path, times=None):
         return os.utime(self._full_path(path), times)
@@ -98,7 +98,6 @@ class Passthrough(Operations):
 
     def open(self, path, flags):
         full_path = self._full_path(path)
-        print("CI SIAMO")
         return os.open(full_path, flags)
 
     def create(self, path, mode, fi=None):
