@@ -9,6 +9,7 @@ from os import listdir
 import tempfile
 from pathlib import Path
 from aesmix import MixSlice
+import sha3
 
 
 from fuse import FUSE, FuseOSError, Operations
@@ -38,19 +39,19 @@ class Passthrough(Operations):
         with open(self.temp_dir+'/corrtable',"w") as corrtable_file:
             for x in self.corrTable:
                 corrtable_file.write(x+',')
-        print("Correspondance table available under: ",self.temp_dir+"/corrtable")
+        print("[*] Correspondance table available under: ",self.temp_dir+"/corrtable")
         
-    def decrypt(self,fragpath):
+    def decrypt(self,fragpath,plainpath):
         keyfile = (fragpath.replace(".enc",".public") if os.path.isfile(fragpath.replace(".enc",".public")) else fragpath.replace(".enc",".private"))
         assert os.path.isfile(keyfile), "key file not valid"
-        print("Decrypting fragdir %s using key %s ..." %
+        print("[*] Decrypting fragdir %s using key %s ..." %
                  (fragpath, keyfile))
-        output = fragpath+".dec"
+        output = plainpath
         manager = MixSlice.load_from_file(fragpath,keyfile)
         plaindata = manager.decrypt()
         with open(output,"wb") as fp:
             fp.write(plaindata)
-        print("Decrypted file: %s" % output)
+        print("[*] Decrypted file: %s" % output)
     
     # Filesystem methods
     # ==================
@@ -79,14 +80,15 @@ class Passthrough(Operations):
 	            self.listacorr = (f.read().split(','))
 	            self.locations =[self.listacorr[0],self.listacorr[1]]
         
-        if full_path[-4:] == ".enc":
-            if full_path.replace(self.root,"") in self.listacorr:
-                self.decrypt(full_path)
-                self.listacorr.remove(full_path.replace(self.root,""))
-                print(self.listacorr)
-                print("Found")
+        if full_path[-4:] == ".enc":  #se si sta accendo ad una fragpath
+            if full_path.replace(self.root,"") in self.listacorr:    #e questa fragpath indirizza una vera fragdir            
+                index = self.listacorr.index(full_path.replace(self.root,""))
+                temporary_plain_path = self.temp_dir+'/'+self.listacorr[index+1] 
+                self.decrypt(full_path,temporary_plain_path) #decifro la fragdir e putto il plaintext nella /tmp/ nel file toucchato
+                self.listacorr.remove(full_path.replace(self.root,"")) #poppo la fragpath per motivi di ridondanda a questo if quando accedo per decifrarla       
+                
             else:
-                print("not found")
+                print("Hai gia' decifrato questo file")
             
             
         
@@ -194,7 +196,9 @@ class Passthrough(Operations):
 def main(mountpoint, root, masterpassword):
     pw = ''.join(open(root+"password").read().split('\n'))
     print(pw)
-    if pw == masterpassword:
+    mphashed = sha3.keccak_512(masterpassword.encode('utf_8')).hexdigest()
+    print(mphashed)
+    if pw == mphashed:
         FUSE(Passthrough(root,mountpoint), mountpoint, nothreads=True, foreground=True)     
     else:
         print("Masterpassword sbagliata")
