@@ -10,6 +10,7 @@ import tempfile
 from pathlib import Path
 from aesmix import MixSlice
 import sha3
+import datetime
 
 
 from fuse import FUSE, FuseOSError, Operations
@@ -44,6 +45,7 @@ class Passthrough(Operations):
     def decrypt(self,fragpath,plainpath):
         keyfile = (fragpath.replace(".enc",".public") if os.path.isfile(fragpath.replace(".enc",".public")) else fragpath.replace(".enc",".private"))
         assert os.path.isfile(keyfile), "key file not valid"
+        print("[*] Start decrypting at: ",datetime.datetime.now())
         print("[*] Decrypting fragdir %s using key %s ..." %
                  (fragpath, keyfile))
         output = plainpath
@@ -52,13 +54,17 @@ class Passthrough(Operations):
         with open(output,"wb") as fp:
             fp.write(plaindata)
         print("[*] Decrypted file: %s" % output)
+        print("[*] End decrypting at: ",datetime.datetime.now())
+        
+        #plain = self.open(output,os.O_RDONLY)
+        #print(os.read(plain,1000))
     
     # Filesystem methods
     # ==================
 
     def access(self, path, mode):
         full_path = self._full_path(path)
-        print("Sono entrato in: ",full_path)
+        print("You entered in: ",full_path)
         #se e' il primo accesso al mountpoint, touccha i file e crea tabella di corrisp e la mette in una lista che servira a fare da medium
         if full_path == self.root and self.isfirst == True: 
             toTouch = []
@@ -85,41 +91,46 @@ class Passthrough(Operations):
                 index = self.listacorr.index(full_path.replace(self.root,""))
                 temporary_plain_path = self.temp_dir+'/'+self.listacorr[index+1] 
                 self.decrypt(full_path,temporary_plain_path) #decifro la fragdir e putto il plaintext nella /tmp/ nel file toucchato
-                self.listacorr.remove(full_path.replace(self.root,"")) #poppo la fragpath per motivi di ridondanda a questo if quando accedo per decifrarla       
-                
+                self.listacorr.remove(full_path.replace(self.root,"")) #poppo la fragpath per motivi di ridondanda a questo if quando accedo per decifrarla
             else:
-                print("Hai gia' decifrato questo file")
-            
+                print("Hai gia' decifrato questo file")          
             
         
         if not os.access(full_path, mode):
             raise FuseOSError(errno.EACCES)
+            
+            
 
     def chmod(self, path, mode):
         full_path = self._full_path(path)
-        return os.chmod(full_path, mode)
+        print("[*] Changing permission")
+        os.chmod(full_path, mode)
+        print("[*] Permission Changed")
+        return
 
     def chown(self, path, uid, gid):
         full_path = self._full_path(path)
         return os.chown(full_path, uid, gid)
 
-    def getattr(self, path, fh=None):
+    def getattr(self, path, fh=None): #triggerato da ls, stat,...
+        #print("[*] Giving info of: ",path)
         full_path = self._full_path(path)
         st = os.lstat(full_path)
         return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
                      'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))
 
-    def readdir(self, path, fh):
+    def readdir(self, path, fh): #triggerato da ls, dir su directory
         full_path = self._full_path(path)
-
+        print("Sto leggendo la directory",full_path)
         dirents = ['.', '..']
         if os.path.isdir(full_path):
             dirents.extend(os.listdir(full_path))
         for r in dirents:
             yield r
 
-    def readlink(self, path):
+    def readlink(self, path): 
         pathname = os.readlink(self._full_path(path))
+        print("Ho letto link: ",pathname)
         if pathname.startswith("/"):
             # Path name is absolute, sanitize it.
             return os.path.relpath(pathname, self.root)
@@ -131,7 +142,13 @@ class Passthrough(Operations):
 
     def rmdir(self, path):
         full_path = self._full_path(path)
-        return os.rmdir(full_path)
+        print(full_path)
+        if full_path[-4:] == '.enc': #Se stai eliminando una fragdir elimina anche le chiavi di decifratura ormai inutili
+            os.rmdir(full_path)
+            os.remove(full_path.replace(".enc",".public"))
+            os.remove(full_path.replace(".enc",".private"))
+        else:
+            return os.rmdir(full_path)
 
     def mkdir(self, path, mode):
         return os.mkdir(self._full_path(path), mode)
@@ -162,8 +179,12 @@ class Passthrough(Operations):
     # ============
 
     def open(self, path, flags):
-        full_path = self._full_path(path)
-        print("CI SIAMO")
+        if path[-4:] == ".dec":
+            print("plaintext: " ,path, "opened")
+            return os.open(path,flags)
+        else:
+            full_path = self._full_path(path)
+            print(full_path, "opened")
         return os.open(full_path, flags)
 
     def create(self, path, mode, fi=None):
@@ -187,6 +208,7 @@ class Passthrough(Operations):
         return os.fsync(fh)
 
     def release(self, path, fh):
+        print("ho chiuso il file: ",path)
         return os.close(fh)
 
     def fsync(self, path, fdatasync, fh):
@@ -195,10 +217,9 @@ class Passthrough(Operations):
 
 def main(mountpoint, root, masterpassword):
     pw = ''.join(open(root+"password").read().split('\n'))
-    print(pw)
     mphashed = sha3.keccak_512(masterpassword.encode('utf_8')).hexdigest()
-    print(mphashed)
     if pw == mphashed:
+        print("Password accepted")
         FUSE(Passthrough(root,mountpoint), mountpoint, nothreads=True, foreground=True)     
     else:
         print("Masterpassword sbagliata")
