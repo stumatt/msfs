@@ -35,12 +35,19 @@ class Passthrough(Operations):
         path = os.path.join(self.root, partial)
         return path
 
-    def save_ct(self):
-        print("[*] Realizing correspondace table")
-        with open(self.temp_dir+'/corrtable',"w") as corrtable_file:
-            for x in self.corrTable:
-                corrtable_file.write(x+',')
-        print("[*] Correspondance table available under: ",self.temp_dir+"/corrtable")
+    def save_ct(self,x):
+        if x == 'r':
+            print("[*] Realizing correspondace table")
+            with open(self.temp_dir+'/corrtable',"w") as corrtable_file:
+                for x in self.corrTable:
+                    corrtable_file.write(x+',')
+            print("[*] Correspondance table available under: ",self.temp_dir+"/corrtable")
+        elif x == 'u':
+            print("[*] Updating correspondace table")
+            with open(self.temp_dir+'/corrtable',"w") as corrtable_file:
+                for x in self.corrTable:
+                    corrtable_file.write(x+',')
+            print("[*] Updated correspondance table available under: ",self.temp_dir+"/corrtable")
         
     def decrypt(self,fragpath,plainpath):
         keyfile = (fragpath.replace(".enc",".public") if os.path.isfile(fragpath.replace(".enc",".public")) else fragpath.replace(".enc",".private"))
@@ -74,9 +81,12 @@ class Passthrough(Operations):
         print("Public key file:  %s" % public)
         print("Private key file: %s" % private)
     
-    # Filesystem methods
+    # Implemented filesystem methods
     # ==================
-
+    # L'accesso alle directory e' fondamentale per questo filesystem, questo perche' i ciphertext sono directory di frammenti
+    # dunque l'accesso ad una directory viene regolato in base al tipo di directory, se e' una fragdir allora l'accesso equivale 
+    # ad una richiesta di decifratura se e' una directory qualsiasi invece viene permesso l'accesso come un qualsiasi file system
+    
     def access(self, path, mode):
         full_path = self._full_path(path)
         print("You entered in: ",full_path)
@@ -93,32 +103,79 @@ class Passthrough(Operations):
                 for x in toTouch: #per ogni fragdir nel mountpoint
                     Path(self.temp_dir+"/"+x).touch() #touccho il relativo decriptato
                     self.corrTable.append(x.replace(".dec","")+','+x) #ne aggiungo il nome alla corrtable sia del cipher che del plain
-                self.save_ct() #salvo la corrtable in un file (INUTILE?????)
+                self.save_ct('r') #salvo la corrtable in un file (INUTILE?????)
             
             self.isfirst = False #Questo mi permettere di fare tutto quello sopra solo al primo accesso ad MP
             
-            with open(self.temp_dir+"/corrtable","r") as f:
-	            self.listacorr = (f.read().split(','))
-	            self.locations =[self.listacorr[0],self.listacorr[1]]
         
         if full_path[-4:] == ".enc":  #se si sta accendo ad una fragpath
-            with open(self.temp_dir+"/corrtable","r") as f:
-	            self.listacorr = (f.read().split(','))
-	            self.locations =[self.listacorr[0],self.listacorr[1]]
-            print(full_path)
-            if full_path.replace(self.root,"") in self.listacorr:    #e questa fragpath indirizza una vera fragdir            
-                index = self.listacorr.index(full_path.replace(self.root,""))
-                temporary_plain_path = self.temp_dir+'/'+self.listacorr[index+1] 
-                self.decrypt(full_path,temporary_plain_path) #decifro la fragdir e putto il plaintext nella /tmp/ nel file toucchato
-                self.listacorr.remove(full_path.replace(self.root,"")) #poppo la fragpath per motivi di ridondanda a questo if quando accedo per decifrarla
-            else:
-                print("Hai gia' decifrato questo file")          
-            
-        
+            print('_'*80)
+            s = input("ATTENZIONE: Sei entrato in una directory che contiene i frammenti di un file cifrato, vuoi decifrarlo? Y/N \n")
+            x = True
+            while x == True:
+                if s == 'Y' or s == 'y':
+                    with open(self.temp_dir+"/corrtable","r") as f:
+	                    self.listacorr = (f.read().split(','))
+	                    self.locations =[self.listacorr[0],self.listacorr[1]]
+                    print(full_path)
+                    if full_path.replace(self.root,"") in self.listacorr:    #e questa fragpath indirizza una vera fragdir            
+                        index = self.listacorr.index(full_path.replace(self.root,""))
+                        temporary_plain_path = self.temp_dir+'/'+self.listacorr[index+1] 
+                        self.decrypt(full_path,temporary_plain_path) #decifro la fragdir e putto il plaintext nella /tmp/ nel file toucchato
+                        self.listacorr.remove(full_path.replace(self.root,"")) #poppo la fragpath per motivi di ridondanda a questo if quando accedo per decifrarla
+                        x = False
+                elif s == 'n' or s == 'N':
+                    print('_'*100)
+                    print("ATTENZIONE: Sei in una fragdir, la compromissione di un solo frammento dentro questa directory rende impossibile la ricostruzione del plaintext!")
+                    x = False
+                else:
+                    s = input("Input non valido! Inserisci Y/N \n")
+                    x = True
+                    
         if not os.access(full_path, mode):
             raise FuseOSError(errno.EACCES)
+    
+    def rmdir(self, path):
+        full_path = self._full_path(path)
+        print("Sto eliminando: ",full_path)
+        if full_path[-4:] == '.enc': #Se stai eliminando una fragdir elimina anche le chiavi di decifratura ormai inutili
+            os.rmdir(full_path)
+            os.remove(full_path.replace(".enc",".public"))
+            os.remove(full_path.replace(".enc",".private"))
+        else:
+            return os.rmdir(full_path)
             
-            
+    
+    # Implemented file methods
+    # ============
+    
+    def release(self, path, fh): #4
+        full_path = self._full_path(path)
+        if not os.path.isdir(full_path):            
+            print("_"*80)
+            print("Hai salvato il file: ",path)
+            s = input("ATTENZIONE: Se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? Y/N \n")
+            x = True
+            while x:
+                if s == 'Y' or s == 'y':
+                    self.encrypt(full_path)
+                    print(full_path + " Encrypted")
+                    self.corrTable.append(path.replace('/','')+".enc"+','+path.replace('/','')+".enc.dec")
+                    self.save_ct('u')
+                    x = False
+                elif s == 'n' or s == 'N':
+                    print("Potrai cifrarlo al prossimo save")
+                    x = False
+                else:
+                    s = input("Non hai inserito correttamente. Digita Y o N! \n")
+                    x = True                
+        return os.close(fh)
+    
+    
+    
+    
+    # Non implemented filesystem methods
+    # ==================
 
     def chmod(self, path, mode):
         full_path = self._full_path(path)
@@ -159,15 +216,7 @@ class Passthrough(Operations):
     def mknod(self, path, mode, dev):
         return os.mknod(self._full_path(path), mode, dev)
 
-    def rmdir(self, path):
-        full_path = self._full_path(path)
-        print(full_path)
-        if full_path[-4:] == '.enc': #Se stai eliminando una fragdir elimina anche le chiavi di decifratura ormai inutili
-            os.rmdir(full_path)
-            os.remove(full_path.replace(".enc",".public"))
-            os.remove(full_path.replace(".enc",".private"))
-        else:
-            return os.rmdir(full_path)
+    
 
     def mkdir(self, path, mode):
         return os.mkdir(self._full_path(path), mode)
@@ -194,7 +243,7 @@ class Passthrough(Operations):
     def utimens(self, path, times=None):
         return os.utime(self._full_path(path), times)
 
-    # File methods
+    # Non implemented file methods
     # ============
 
     def open(self, path, flags): #1
@@ -229,25 +278,7 @@ class Passthrough(Operations):
     def flush(self, path, fh): #forces write of file with file descriptor fd to disk #3
         print("sto forzando il write  ",path)
         return os.fsync(fh)
-
-    def release(self, path, fh): #4
-        full_path = self._full_path(path)
-        if not os.path.isdir(full_path):
-            print("Hai salvato il file: ",full_path)
-            s = input("Se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? y/n \n")
-            if s == 'y':
-                self.encrypt(full_path)
-                print(full_path + " Encrypted")
-                self.corrTable.append(path.replace('/','')+".enc"+','+path.replace('/','')+".enc.dec")
-                self.save_ct()
-                print(path, " added in corrtable")
-            elif s == 'n':
-                print("Potrai cifrarlo al prossimo save")
-            else:
-                print("inserisci y or n")
-                
-        return os.close(fh)
-
+       
     def fsync(self, path, fdatasync, fh):
         print("sto flushando ",path)
         return self.flush(path, fh)
