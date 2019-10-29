@@ -59,6 +59,21 @@ class Passthrough(Operations):
         #plain = self.open(output,os.O_RDONLY)
         #print(os.read(plain,1000))
     
+    def encrypt(self,path):
+        key = os.urandom(16)
+        iv = os.urandom(16)
+        output = path+".enc"
+        public = path+".public"
+        private = path+".private"
+        with open(path,"rb") as f_opened:
+            data = f_opened.read()
+        print("Encrypting file %s ..." %path)
+        manager = MixSlice.encrypt(data, key, iv)
+        manager.save_to_files(output,public,private) #COME GENERA LE CHIAVI
+        print("Output fragdir: %s" % output)
+        print("Public key file:  %s" % public)
+        print("Private key file: %s" % private)
+    
     # Filesystem methods
     # ==================
 
@@ -87,6 +102,10 @@ class Passthrough(Operations):
 	            self.locations =[self.listacorr[0],self.listacorr[1]]
         
         if full_path[-4:] == ".enc":  #se si sta accendo ad una fragpath
+            with open(self.temp_dir+"/corrtable","r") as f:
+	            self.listacorr = (f.read().split(','))
+	            self.locations =[self.listacorr[0],self.listacorr[1]]
+            print(full_path)
             if full_path.replace(self.root,"") in self.listacorr:    #e questa fragpath indirizza una vera fragdir            
                 index = self.listacorr.index(full_path.replace(self.root,""))
                 temporary_plain_path = self.temp_dir+'/'+self.listacorr[index+1] 
@@ -178,7 +197,7 @@ class Passthrough(Operations):
     # File methods
     # ============
 
-    def open(self, path, flags):
+    def open(self, path, flags): #1
         if path[-4:] == ".dec":
             print("plaintext: " ,path, "opened")
             return os.open(path,flags)
@@ -189,29 +208,48 @@ class Passthrough(Operations):
 
     def create(self, path, mode, fi=None):
         full_path = self._full_path(path)
+        print("Sto creando: ",full_path)
         return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
 
     def read(self, path, length, offset, fh):
         os.lseek(fh, offset, os.SEEK_SET)
         return os.read(fh, length)
 
-    def write(self, path, buf, offset, fh):
+    def write(self, path, buf, offset, fh): #2
+        print("sto scrivendo ",path)
         os.lseek(fh, offset, os.SEEK_SET)
         return os.write(fh, buf)
 
     def truncate(self, path, length, fh=None):
         full_path = self._full_path(path)
+        print("sto troncando ", full_path)
         with open(full_path, 'r+') as f:
             f.truncate(length)
 
-    def flush(self, path, fh):
+    def flush(self, path, fh): #forces write of file with file descriptor fd to disk #3
+        print("sto forzando il write  ",path)
         return os.fsync(fh)
 
-    def release(self, path, fh):
-        print("ho chiuso il file: ",path)
+    def release(self, path, fh): #4
+        full_path = self._full_path(path)
+        if not os.path.isdir(full_path):
+            print("Hai salvato il file: ",full_path)
+            s = input("Se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? y/n \n")
+            if s == 'y':
+                self.encrypt(full_path)
+                print(full_path + " Encrypted")
+                self.corrTable.append(path.replace('/','')+".enc"+','+path.replace('/','')+".enc.dec")
+                self.save_ct()
+                print(path, " added in corrtable")
+            elif s == 'n':
+                print("Potrai cifrarlo al prossimo save")
+            else:
+                print("inserisci y or n")
+                
         return os.close(fh)
 
     def fsync(self, path, fdatasync, fh):
+        print("sto flushando ",path)
         return self.flush(path, fh)
 
 
