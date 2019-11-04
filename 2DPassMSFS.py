@@ -24,7 +24,9 @@ class Passthrough(Operations):
         self.isfirst = True
         self.listacorr = []
         self.corrTable = []
-        self.justTouchedDir = []
+        self.TouchedDir = []
+        self.EBE = self.root+"EnterBeforeUnmount"
+        self.decrypted = []
 
     # Helpers
     # =======
@@ -58,7 +60,10 @@ class Passthrough(Operations):
         full_path = self._full_path(path)
         print("You entered in: ",full_path)
         #se e' il primo accesso al mountpoint, touccha i file e crea tabella di corrisp e la mette in una lista che servira a fare da medium
-        if full_path not in self.justTouchedDir: 
+        if full_path not in self.TouchedDir:
+            if full_path == self.root:
+                print("creating EBE dir")
+                os.mkdir(self.EBE,0o777)
             toTouch = []
             dir = [d for d in listdir(full_path) if os.path.isdir(os.path.join(full_path,d))]  #apre e cerca in mnt/MP
             for x in dir:           
@@ -67,12 +72,20 @@ class Passthrough(Operations):
             if toTouch: #se c'e' almeno un directory .enc
                 for x in toTouch: #per ogni fragdir nel mountpoint
                     Path(full_path+"/"+x).touch() #touccho il relativo decriptato   
-            self.justTouchedDir.append(full_path)
+            self.TouchedDir.append(full_path)
             #self.isfirst = False #Questo mi permettere di fare tutto quello sopra solo al primo accesso ad MP
+        if full_path == self.EBE and os.path.isdir(self.EBE):
+            for filename in Path(self.root).rglob('*.dec'):
+                os.remove(filename)
+                print("[*] Deleting: ",filename)
+            os.rmdir(self.EBE)
         else:
             if not os.access(full_path, mode):
                 raise FuseOSError(errno.EACCES)
-
+                
+                
+                
+                             
     def chmod(self, path, mode):
         full_path = self._full_path(path)
         return os.chmod(full_path, mode)
@@ -100,9 +113,7 @@ class Passthrough(Operations):
                     filtered.append(x)                
         dirents.extend(filtered)
         for r in dirents:
-                yield r
-        
-                
+                yield r                       
             
 
     def readlink(self, path):
@@ -150,7 +161,11 @@ class Passthrough(Operations):
 
     def open(self, path, flags):
         full_path = self._full_path(path)
-        self.decrypt(full_path.replace(".dec",""),full_path)
+        if full_path not in self.decrypted:
+            self.decrypt(full_path.replace(".dec",""),full_path)
+            self.decrypted.append(full_path)
+        else:
+            print("File gia' decifrato")
         return os.open(full_path, flags)
 
     def create(self, path, mode, fi=None):
@@ -180,11 +195,17 @@ class Passthrough(Operations):
         return self.flush(path, fh)
 
 
+    
 def main(mountpoint, root):
+    pw = ''.join(open(root+"password").read().split('\n'))
     print("Insert master password to start the mounting operation")
-    pw = getpass()
-    print(pw)
-    FUSE(Passthrough(root,mountpoint), mountpoint, nothreads=True, foreground=True)
+    masterpassword = getpass()
+    mphashed = sha3.keccak_512(masterpassword.encode('utf_8')).hexdigest()
+    if pw == mphashed:
+        print("Password accepted")
+        FUSE(Passthrough(root,mountpoint), mountpoint, nothreads=True, foreground=True)     
+    else:
+        print("Masterpassword sbagliata")
 
 if __name__ == '__main__':
     main(sys.argv[2], sys.argv[1])
