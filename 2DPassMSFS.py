@@ -62,7 +62,7 @@ class Passthrough(Operations):
         #se e' il primo accesso al mountpoint, touccha i file e crea tabella di corrisp e la mette in una lista che servira a fare da medium
         if full_path not in self.TouchedDir:
             if full_path == self.root:
-                print("creating EBE dir")
+                #print("creating EBE dir")
                 os.mkdir(self.EBE,0o777)
             toTouch = []
             dir = [d for d in listdir(full_path) if os.path.isdir(os.path.join(full_path,d))]  #apre e cerca in mnt/MP
@@ -107,13 +107,15 @@ class Passthrough(Operations):
         toFilter = [] #lista di tutti i file e le directory presenti nella directory aperta
         filtered = [] #lista di quelli ch vanno bene
         if os.path.isdir(full_path): #se stai entrando in una directory
+            if(full_path[-1:]!='/'):
+                full_path = full_path+'/'
             toFilter.extend(os.listdir(full_path))
             for x in toFilter:
-                if(x[-4:] == ".dec") or (os.path.isdir(self.root+x) and x[-4:] != ".enc"): #tira fuori solo i .dec
+                if(x[-4:] == ".dec") or (os.path.isdir(full_path+x) and not x[-4:] == ".enc"): #C'e' qualcosa che non mi permette di vedere directory
                     filtered.append(x)                
         dirents.extend(filtered)
         for r in dirents:
-                yield r                       
+            yield r                       
             
 
     def readlink(self, path):
