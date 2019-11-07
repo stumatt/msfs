@@ -30,6 +30,9 @@ class Passthrough(Operations):
         self.EBE = self.root+"EnterBeforeUnmount"
         self.decrypted = []
         
+        self.openedfile = []
+        self.openedfilesize = []
+        
 
     # Helpers
     # =======
@@ -53,7 +56,27 @@ class Passthrough(Operations):
                 print("errore")
         return deckey.name
                 
+    def encquest(self,full_path):
+        index = self.openedfile.index(full_path)
+        if(self.openedfilesize[index] != os.stat(full_path).st_size):
+            print(self.openedfilesize[index] , "   e   ", os.stat(full_path).st_size)                
+            s = input("ATTENZIONE: Hai salvato un file, se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? Y/N \n")
+            x = True
+            while x:
+                if s == 'Y' or s == 'y':
+                    self.encrypt(full_path)
+                    x = False
+                    ris = 1
+                elif s == 'n' or s == 'N':
+                    print("Potrai cifrarlo al prossimo save")
+                    x = False
+                    ris = -1
+                else:
+                    s = input("Non hai inserito correttamente. Digita Y o N! \n")
+                    x = True
+        return ris
         
+    
     def decrypt(self,fragpath,plainpath):
         keyfile = (fragpath.replace(".enc",".public.aes") if os.path.isfile(fragpath.replace(".enc",".public.aes")) else fragpath.replace(".enc",".private.aes"))
         assert os.path.isfile(keyfile), "key file not valid"
@@ -68,6 +91,23 @@ class Passthrough(Operations):
             fp.write(plaindata)
         print("[*] Decrypted file: %s" % output)
         #print("[*] End decrypting at: ",datetime.datetime.now())
+    
+    
+    def encrypt(self,path):
+        key = os.urandom(16)
+        iv = os.urandom(16)
+        output = path+".enc"
+        public = path+".public"
+        private = path+".private"
+        with open(path,"rb") as f_opened:
+            data = f_opened.read()
+        print("Encrypting file %s ..." %path)
+        manager = MixSlice.encrypt(data, key, iv)
+        manager.save_to_files(output,public,private) #COME GENERA LE CHIAVI
+        print("Output fragdir: %s" % output)
+        print("Public key file:  %s" % public)
+        print("Private key file: %s" % private)
+        
         
         
     # Filesystem methods
@@ -100,23 +140,6 @@ class Passthrough(Operations):
             if not os.access(full_path, mode):
                 raise FuseOSError(errno.EACCES)
                 
-                
-                
-                             
-    def chmod(self, path, mode):
-        full_path = self._full_path(path)
-        return os.chmod(full_path, mode)
-
-    def chown(self, path, uid, gid):
-        full_path = self._full_path(path)
-        return os.chown(full_path, uid, gid)
-
-    def getattr(self, path, fh=None):
-        full_path = self._full_path(path)
-        st = os.lstat(full_path)
-        return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
-                     'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))
-
     def readdir(self, path, fh):
         full_path = self._full_path(path) #trasforma il path passato in fullpath 
         print(full_path)
@@ -132,7 +155,22 @@ class Passthrough(Operations):
                     filtered.append(x)                
         dirents.extend(filtered)
         for r in dirents:
-            yield r                       
+            yield r             
+                
+                             
+    def chmod(self, path, mode):
+        full_path = self._full_path(path)
+        return os.chmod(full_path, mode)
+
+    def chown(self, path, uid, gid):
+        full_path = self._full_path(path)
+        return os.chown(full_path, uid, gid)
+
+    def getattr(self, path, fh=None):
+        full_path = self._full_path(path)
+        st = os.lstat(full_path)
+        return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
+                     'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))                         
             
 
     def readlink(self, path):
@@ -180,6 +218,10 @@ class Passthrough(Operations):
 
     def open(self, path, flags):
         full_path = self._full_path(path)
+        if full_path not in self.openedfile:
+            self.openedfile.append(full_path)
+            self.openedfilesize.append(os.stat(full_path).st_size)
+        
         if full_path not in self.decrypted:
             self.decrypt(full_path.replace(".dec",""),full_path)
             self.decrypted.append(full_path)
@@ -196,19 +238,41 @@ class Passthrough(Operations):
         return os.read(fh, length)
 
     def write(self, path, buf, offset, fh):
+        print("write")
         os.lseek(fh, offset, os.SEEK_SET)
         return os.write(fh, buf)
 
+    
+    ####################################################################################
+    ####################################################################################
+    ####################################################################################
+
+    ###### GUARDARE LE RETURN ############
+    
     def truncate(self, path, length, fh=None):
-        full_path = self._full_path(path)
-        with open(full_path, 'r+') as f:
-            f.truncate(length)
+        full_path = self._full_path(path)              
+        if not os.path.isdir(full_path) and full_path in self.openedfile:
+            ris = self.encquest(full_path)
+            #if ris == 1: #se 'e stato cifrato fai qualcosa
+            #else: #fai qualcos'altro
+        
+               
 
     def flush(self, path, fh):
-        return os.fsync(fh)
+        full_path = self._full_path(path)
+        if not os.path.isdir(full_path) and full_path not in self.openedfile:            
+            print("Hai importato il file: " , path)
+            s = input("1 ATTENZIONE: Se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? Y/N \n")
+            #switch!!!!
+            
+    ####################################################################################
+    ####################################################################################
+    ####################################################################################
+    
 
-    def release(self, path, fh):
-        return os.close(fh)
+    def release(self, path, fh):   
+        return os.close(fh)            
+            
 
     def fsync(self, path, fdatasync, fh):
         return self.flush(path, fh)
