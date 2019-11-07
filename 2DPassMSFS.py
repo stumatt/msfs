@@ -12,13 +12,15 @@ from pathlib import Path
 from aesmix import MixSlice
 import sha3
 import datetime
+import pyAesCrypt
 from fuse import FUSE, FuseOSError, Operations
 
 
 class Passthrough(Operations):
-    def __init__(self, root, mountpoint):
+    def __init__(self, root, mountpoint, mp):
         self.root = root
         self.mountpoint = mountpoint
+        self.masterpassword = mp
         self.temp_dir =""
         self.locations = []
         self.isfirst = True
@@ -27,6 +29,7 @@ class Passthrough(Operations):
         self.TouchedDir = []
         self.EBE = self.root+"EnterBeforeUnmount"
         self.decrypted = []
+        
 
     # Helpers
     # =======
@@ -37,10 +40,24 @@ class Passthrough(Operations):
         path = os.path.join(self.root, partial)
         return path
     
-    
+    def decryptkey(self, enckey):
+        buffersize = 64*1024
+        size = os.stat(enckey).st_size
+        with open(enckey,'rb') as fin:
+            try:
+                deckey = tempfile.NamedTemporaryFile(delete=False)
+                print("chiave decifrata in: ",deckey.name)
+                with open(deckey.name,'wb') as fout:
+                    pyAesCrypt.decryptStream(fin,fout,self.masterpassword,buffersize,size)
+            except ValueError:
+                print("errore")
+        return deckey.name
+                
+        
     def decrypt(self,fragpath,plainpath):
-        keyfile = (fragpath.replace(".enc",".public") if os.path.isfile(fragpath.replace(".enc",".public")) else fragpath.replace(".enc",".private"))
+        keyfile = (fragpath.replace(".enc",".public.aes") if os.path.isfile(fragpath.replace(".enc",".public.aes")) else fragpath.replace(".enc",".private.aes"))
         assert os.path.isfile(keyfile), "key file not valid"
+        keyfile = self.decryptkey(keyfile)
         #print("[*] Start decrypting at: ",datetime.datetime.now())
         print("[*] Decrypting fragdir %s using key %s ..." %
                  (fragpath, keyfile))
@@ -205,7 +222,7 @@ def main(mountpoint, root):
     mphashed = sha3.keccak_512(masterpassword.encode('utf_8')).hexdigest()
     if pw == mphashed:
         print("Password accepted")
-        FUSE(Passthrough(root,mountpoint), mountpoint, nothreads=True, foreground=True)     
+        FUSE(Passthrough(root,mountpoint,masterpassword), mountpoint, nothreads=True, foreground=True)     
     else:
         print("Masterpassword sbagliata")
 
