@@ -21,12 +21,12 @@ class Passthrough(Operations):
         self.root = root
         self.mountpoint = mountpoint
         self.masterpassword = mp
+        self.TouchedDir = []
         self.temp_dir =""
         self.locations = []
         self.isfirst = True
         self.listacorr = []
         self.corrTable = []
-        self.TouchedDir = []
         self.EBE = self.root+"EnterBeforeUnmount"
         self.decrypted = []
         
@@ -55,6 +55,15 @@ class Passthrough(Operations):
             except ValueError:
                 print("errore")
         return deckey.name
+    
+    ####################################################
+    ####################################################
+    def keyencryption(self,public,private):
+        #Metodo che deve cifrare le chiavi generate da mixslice con cui ha cifrato un plaintext
+        return
+        
+    ####################################################
+    ####################################################
                 
     def encquest(self,full_path):
         index = self.openedfile.index(full_path)
@@ -80,7 +89,7 @@ class Passthrough(Operations):
     def decrypt(self,fragpath,plainpath):
         keyfile = (fragpath.replace(".enc",".public.aes") if os.path.isfile(fragpath.replace(".enc",".public.aes")) else fragpath.replace(".enc",".private.aes"))
         assert os.path.isfile(keyfile), "key file not valid"
-        keyfile = self.decryptkey(keyfile)
+        keyfile = self.decryptkey(keyfile) #ritorna deckey
         #print("[*] Start decrypting at: ",datetime.datetime.now())
         print("[*] Decrypting fragdir %s using key %s ..." %
                  (fragpath, keyfile))
@@ -89,11 +98,14 @@ class Passthrough(Operations):
         plaindata = manager.decrypt()
         with open(output,"wb") as fp:
             fp.write(plaindata)
+        os.remove(keyfile) #La chiave temporanea viene eliminata 
         print("[*] Decrypted file: %s" % output)
         #print("[*] End decrypting at: ",datetime.datetime.now())
     
     
     def encrypt(self,path):
+        if path[-8:] == ".enc.dec":
+            path = path.replace(".enc.dec","")
         key = os.urandom(16)
         iv = os.urandom(16)
         output = path+".enc"
@@ -107,55 +119,50 @@ class Passthrough(Operations):
         print("Output fragdir: %s" % output)
         print("Public key file:  %s" % public)
         print("Private key file: %s" % private)
-        
+        ## CALL ENCRYPTIONKEY
         
         
     # Filesystem methods
     # ==================
 
-    def access(self, path, mode):
-        full_path = self._full_path(path)
-        print("You entered in: ",full_path)
-        #se e' il primo accesso al mountpoint, touccha i file e crea tabella di corrisp e la mette in una lista che servira a fare da medium
-        if full_path not in self.TouchedDir:
-            if full_path == self.root:
-                #print("creating EBE dir")
-                os.mkdir(self.EBE,0o777)
+    def access(self, path, mode): #triggerato quando si entra in una directory
+        full_path = self._full_path(path)   
+        if full_path not in self.TouchedDir: #Se e' il primo accesso a questa dir, touccha i .dec relativi ai .enc in questa dir
+            print("[*] Touching file")
             toTouch = []
-            dir = [d for d in listdir(full_path) if os.path.isdir(os.path.join(full_path,d))]  #apre e cerca in mnt/MP
-            for x in dir:           
-                if(x[-4:]==".enc"):
-                    toTouch.append(x+".dec")
+            dir = [d for d in listdir(full_path) if os.path.isdir(os.path.join(full_path,d)) and d[-4:]==".enc"]  #preleva tutte le directories
+            for x in dir:
+                toTouch.append(x+".dec") # preleva quelle da toucchare
             if toTouch: #se c'e' almeno un directory .enc
                 for x in toTouch: #per ogni fragdir nel mountpoint
                     Path(full_path+"/"+x).touch() #touccho il relativo decriptato   
-            self.TouchedDir.append(full_path)
-            #self.isfirst = False #Questo mi permettere di fare tutto quello sopra solo al primo accesso ad MP
-        if full_path == self.EBE and os.path.isdir(self.EBE):
-            for filename in Path(self.root).rglob('*.dec'):
-                os.remove(filename)
-                print("[*] Deleting: ",filename)
-            os.rmdir(self.EBE)
+            self.TouchedDir.append(full_path)#Tengo traccia delle directory che hanno subito touch
         else:
             if not os.access(full_path, mode):
                 raise FuseOSError(errno.EACCES)
                 
-    def readdir(self, path, fh):
+    def readdir(self, path, fh): #triggerato quando si visualizza il contenuto di una directory
         full_path = self._full_path(path) #trasforma il path passato in fullpath 
-        print(full_path)
         dirents = ['.', '..']
         toFilter = [] #lista di tutti i file e le directory presenti nella directory aperta
         filtered = [] #lista di quelli ch vanno bene
         if os.path.isdir(full_path): #se stai entrando in una directory
-            if(full_path[-1:]!='/'):
+            if(full_path[-1:]!='/'): 
                 full_path = full_path+'/'
-            toFilter.extend(os.listdir(full_path))
+            toFilter.extend(os.listdir(full_path)) #preleva tutti file e directories
             for x in toFilter:
-                if(x[-4:] == ".dec") or (os.path.isdir(full_path+x) and not x[-4:] == ".enc"): #C'e' qualcosa che non mi permette di vedere directory
+                if(x[-4:] == ".dec") or (os.path.isdir(full_path+x) and not x[-4:] == ".enc"): #Se e' un .dec, o una directory di non frammenti
                     filtered.append(x)                
         dirents.extend(filtered)
         for r in dirents:
-            yield r             
+            yield r      
+    
+    
+    def destroy(self,path): #triggerato dall'unmount del filesystem 
+        print("[*] Unmounting filesystem under", self.mountpoint)
+        for filename in Path(self.root).rglob('*.dec'): #Va a rimuovere tutti i .dec toucchati o riempiti
+                os.remove(filename)
+                print("[*] Deleting: ",filename)
                 
                              
     def chmod(self, path, mode):
@@ -258,12 +265,22 @@ class Passthrough(Operations):
         
                
 
-    def flush(self, path, fh):
+    def flush(self, path, fh): #triggherato quando un file viene importato
         full_path = self._full_path(path)
         if not os.path.isdir(full_path) and full_path not in self.openedfile:            
             print("Hai importato il file: " , path)
             s = input("1 ATTENZIONE: Se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? Y/N \n")
-            #switch!!!!
+            x = True
+            while x:
+                if s == 'Y' or s == 'y':
+                    self.encrypt(full_path)
+                    x = False
+                elif s == 'n' or s == 'N':
+                    print("Potrai cifrarlo al prossimo save")
+                    x = False
+                else:
+                    s = input("Non hai inserito correttamente. Digita Y o N! \n")
+                    x = True
             
     ####################################################################################
     ####################################################################################
@@ -280,12 +297,12 @@ class Passthrough(Operations):
 
     
 def main(mountpoint, root):
-    pw = ''.join(open(root+"password").read().split('\n'))
-    print("Insert master password to start the mounting operation")
+    pw = ''.join(open(root+".password").read().split('\n'))
+    print("Insert master password to start the mounting operation: ")
     masterpassword = getpass()
     mphashed = sha3.keccak_512(masterpassword.encode('utf_8')).hexdigest()
     if pw == mphashed:
-        print("Password accepted")
+        print("Password accepted, filesystem mounted")
         FUSE(Passthrough(root,mountpoint,masterpassword), mountpoint, nothreads=True, foreground=True)     
     else:
         print("Masterpassword sbagliata")
