@@ -3,6 +3,7 @@
 from __future__ import with_statement
 
 from getpass import getpass
+import time
 import os
 import sys
 import errno
@@ -15,23 +16,26 @@ import datetime
 import pyAesCrypt
 from fuse import FUSE, FuseOSError, Operations
 
-
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    
 class Passthrough(Operations):
     def __init__(self, root, mountpoint, mp):
         self.root = root
         self.mountpoint = mountpoint
         self.masterpassword = mp
-        self.TouchedDir = []
-        self.temp_dir =""
-        self.locations = []
-        self.isfirst = True
-        self.listacorr = []
-        self.corrTable = []
-        self.EBE = self.root+"EnterBeforeUnmount"
         self.decrypted = []
-        
         self.openedfile = []
         self.openedfilesize = []
+        self.buffersize = 64*1024
+        self.TouchedDir = []        
         
 
     # Helpers
@@ -43,53 +47,52 @@ class Passthrough(Operations):
         path = os.path.join(self.root, partial)
         return path
     
-    def decryptkey(self, enckey):
-        buffersize = 64*1024
+    def keydecryption(self, enckey):
         size = os.stat(enckey).st_size
         with open(enckey,'rb') as fin:
             try:
                 deckey = tempfile.NamedTemporaryFile(delete=False)
                 print("chiave decifrata in: ",deckey.name)
                 with open(deckey.name,'wb') as fout:
-                    pyAesCrypt.decryptStream(fin,fout,self.masterpassword,buffersize,size)
+                    pyAesCrypt.decryptStream(fin,fout,self.masterpassword,self.buffersize,size)
             except ValueError:
                 print("errore")
         return deckey.name
     
-    ####################################################
-    ####################################################
+
     def keyencryption(self,public,private):
-        #Metodo che deve cifrare le chiavi generate da mixslice con cui ha cifrato un plaintext
-        return
+        pyAesCrypt.encryptFile(public,public+".aes",self.masterpassword,self.buffersize)
+        pyAesCrypt.encryptFile(private,private+".aes",self.masterpassword,self.buffersize)
+        os.remove(public)
+        os.remove(private)
         
-    ####################################################
-    ####################################################
                 
     def encquest(self,full_path):
-        index = self.openedfile.index(full_path)
-        if(self.openedfilesize[index] != os.stat(full_path).st_size):
-            print(self.openedfilesize[index] , "   e   ", os.stat(full_path).st_size)                
-            s = input("ATTENZIONE: Hai salvato un file, se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? Y/N \n")
+        index = self.openedfile.index(full_path) #prendi l'indice all'interno della lista dei file aperti
+        if(self.openedfilesize[index] != os.stat(full_path).st_size): # se la size originaria 'e diversa dalla size dopo il salvataggio
+            print("origin size: ",self.openedfilesize[index] , " post save size: ", os.stat(full_path).st_size)                
+            s = input(bcolors.WARNING + "ATTENZIONE: Hai salvato un file, se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? Y/N \n" + bcolors.ENDC)
             x = True
             while x:
                 if s == 'Y' or s == 'y':
                     self.encrypt(full_path)
                     x = False
-                    ris = 1
+                    
                 elif s == 'n' or s == 'N':
                     print("Potrai cifrarlo al prossimo save")
                     x = False
-                    ris = -1
+                    
                 else:
                     s = input("Non hai inserito correttamente. Digita Y o N! \n")
                     x = True
-        return ris
+                    
+        
         
     
     def decrypt(self,fragpath,plainpath):
         keyfile = (fragpath.replace(".enc",".public.aes") if os.path.isfile(fragpath.replace(".enc",".public.aes")) else fragpath.replace(".enc",".private.aes"))
         assert os.path.isfile(keyfile), "key file not valid"
-        keyfile = self.decryptkey(keyfile) #ritorna deckey
+        keyfile = self.keydecryption(keyfile) #ritorna deckey
         #print("[*] Start decrypting at: ",datetime.datetime.now())
         print("[*] Decrypting fragdir %s using key %s ..." %
                  (fragpath, keyfile))
@@ -98,9 +101,10 @@ class Passthrough(Operations):
         plaindata = manager.decrypt()
         with open(output,"wb") as fp:
             fp.write(plaindata)
-        os.remove(keyfile) #La chiave temporanea viene eliminata 
+        os.remove(keyfile) #La chiave temporanea viene eliminata
         print("[*] Decrypted file: %s" % output)
         #print("[*] End decrypting at: ",datetime.datetime.now())
+        time.sleep(1)
     
     
     def encrypt(self,path):
@@ -119,7 +123,8 @@ class Passthrough(Operations):
         print("Output fragdir: %s" % output)
         print("Public key file:  %s" % public)
         print("Private key file: %s" % private)
-        ## CALL ENCRYPTIONKEY
+        os.remove(path)
+        self.keyencryption(public,private)
         
         
     # Filesystem methods
@@ -256,12 +261,11 @@ class Passthrough(Operations):
 
     ###### GUARDARE LE RETURN ############
     
-    def truncate(self, path, length, fh=None):
+    def truncate(self, path, length, fh=None): #metodo triggerato quando viene salvato un file
         full_path = self._full_path(path)              
-        if not os.path.isdir(full_path) and full_path in self.openedfile:
-            ris = self.encquest(full_path)
-            #if ris == 1: #se 'e stato cifrato fai qualcosa
-            #else: #fai qualcos'altro
+        if not os.path.isdir(full_path) and full_path in self.openedfile: #se e' un file che 'e stato aperto gia'
+            self.encquest(full_path) #chiedi cosa deve essere cifrato
+            
         
                
 
@@ -269,7 +273,7 @@ class Passthrough(Operations):
         full_path = self._full_path(path)
         if not os.path.isdir(full_path) and full_path not in self.openedfile:            
             print("Hai importato il file: " , path)
-            s = input("1 ATTENZIONE: Se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? Y/N \n")
+            s = input(bcolors.WARNING + "ATTENZIONE: Se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? Y/N \n" + bcolors.ENDC)
             x = True
             while x:
                 if s == 'Y' or s == 'y':
@@ -302,10 +306,10 @@ def main(mountpoint, root):
     masterpassword = getpass()
     mphashed = sha3.keccak_512(masterpassword.encode('utf_8')).hexdigest()
     if pw == mphashed:
-        print("Password accepted, filesystem mounted")
+        print(bcolors.OKGREEN + "Password accepted, filesystem mounted" + bcolors.ENDC)
         FUSE(Passthrough(root,mountpoint,masterpassword), mountpoint, nothreads=True, foreground=True)     
     else:
-        print("Masterpassword sbagliata")
+        print(bcolors.FAIL + "Masterpassword sbagliata" + bcolors.ENDC)
 
 if __name__ == '__main__':
     main(sys.argv[2], sys.argv[1])
