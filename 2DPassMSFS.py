@@ -14,6 +14,7 @@ from aesmix import MixSlice
 import sha3
 import datetime
 import pyAesCrypt
+import stat
 from fuse import FUSE, FuseOSError, Operations
 
 class bcolors:
@@ -35,7 +36,9 @@ class Passthrough(Operations):
         self.openedfile = []
         self.openedfilesize = []
         self.buffersize = 64*1024
-        self.TouchedDir = []        
+        self.TouchedDir = []
+        self.modified = []
+        self.unlockedDir = []
         
 
     # Helpers
@@ -66,29 +69,7 @@ class Passthrough(Operations):
         os.remove(public)
         os.remove(private)
         
-                
-    def encquest(self,full_path):
-        index = self.openedfile.index(full_path) #prendi l'indice all'interno della lista dei file aperti
-        if(self.openedfilesize[index] != os.stat(full_path).st_size): # se la size originaria 'e diversa dalla size dopo il salvataggio
-            print("origin size: ",self.openedfilesize[index] , " post save size: ", os.stat(full_path).st_size)                
-            s = input(bcolors.WARNING + "ATTENZIONE: Hai salvato un file, se non lo cifri prima di smontare andra' perso, vuoi cifrarlo? Y/N \n" + bcolors.ENDC)
-            x = True
-            while x:
-                if s == 'Y' or s == 'y':
-                    self.encrypt(full_path)
-                    x = False
-                    
-                elif s == 'n' or s == 'N':
-                    print("Potrai cifrarlo al prossimo save")
-                    x = False
-                    
-                else:
-                    s = input("Non hai inserito correttamente. Digita Y o N! \n")
-                    x = True
-                    
         
-        
-    
     def decrypt(self,fragpath,plainpath):
         keyfile = (fragpath.replace(".enc",".public.aes") if os.path.isfile(fragpath.replace(".enc",".public.aes")) else fragpath.replace(".enc",".private.aes"))
         assert os.path.isfile(keyfile), "key file not valid"
@@ -108,6 +89,8 @@ class Passthrough(Operations):
     
     
     def encrypt(self,path):
+        print("Sto cifrando")
+        print(path)
         if path[-8:] == ".enc.dec":
             path = path.replace(".enc.dec","")
         key = os.urandom(16)
@@ -126,12 +109,12 @@ class Passthrough(Operations):
         os.remove(path)
         self.keyencryption(public,private)
         
-        
-    # Filesystem methods
-    # ==================
-
-    def access(self, path, mode): #triggerato quando si entra in una directory
-        full_path = self._full_path(path)   
+    
+    def touch(self,fname, times=None):
+        with open(fname, 'a'):
+            os.utime(fname, times)
+            
+    def fillDir(self,full_path,mode):
         if full_path not in self.TouchedDir: #Se e' il primo accesso a questa dir, touccha i .dec relativi ai .enc in questa dir
             print("[*] Touching file")
             toTouch = []
@@ -140,14 +123,43 @@ class Passthrough(Operations):
                 toTouch.append(x+".dec") # preleva quelle da toucchare
             if toTouch: #se c'e' almeno un directory .enc
                 for x in toTouch: #per ogni fragdir nel mountpoint
-                    Path(full_path+"/"+x).touch() #touccho il relativo decriptato   
+                    self.touch(full_path+"/"+x)
             self.TouchedDir.append(full_path)#Tengo traccia delle directory che hanno subito touch
         else:
             if not os.access(full_path, mode):
                 raise FuseOSError(errno.EACCES)
+        
+        
+        
+        
+    # Filesystem methods
+    # ==================
+
+    def access(self, path, mode): #triggerato quando si entra in una directory
+        full_path = self._full_path(path)
+        if full_path == self.root:
+            self.fillDir(full_path,mode)
+        elif full_path != self.root and full_path not in self.unlockedDir and os.path.isdir(full_path):
+            x = True
+            while(x):
+                mp = getpass()
+                pw = ''.join(open(self.root+".password").read().split('\n'))
+                mphashed = sha3.keccak_512(mp.encode('utf_8')).hexdigest()
+                if mphashed == pw:
+                    print(bcolors.OKGREEN+"Access to ", path+" allowed" + bcolors.ENDC)
+                    self.fillDir(full_path,mode)
+                    self.unlockedDir.append(full_path)
+                    x = False
+                else:
+                    print(bcolors.FAIL+"Access to ", path+" denied, wrong password" + bcolors.ENDC)
+                    
+                
+                
+        
                 
     def readdir(self, path, fh): #triggerato quando si visualizza il contenuto di una directory
-        full_path = self._full_path(path) #trasforma il path passato in fullpath 
+        full_path = self._full_path(path) #trasforma il path passato in fullpath
+        
         dirents = ['.', '..']
         toFilter = [] #lista di tutti i file e le directory presenti nella directory aperta
         filtered = [] #lista di quelli ch vanno bene
@@ -164,6 +176,8 @@ class Passthrough(Operations):
     
     
     def destroy(self,path): #triggerato dall'unmount del filesystem 
+        print("Hai modificato i seguenti file, vuoi cifrarli?")
+        print(self.modified)
         print("[*] Unmounting filesystem under", self.mountpoint)
         for filename in Path(self.root).rglob('*.dec'): #Va a rimuovere tutti i .dec toucchati o riempiti
                 os.remove(filename)
@@ -171,6 +185,8 @@ class Passthrough(Operations):
                 
                              
     def chmod(self, path, mode):
+        print("Chmoding...")
+        print(mode)
         full_path = self._full_path(path)
         return os.chmod(full_path, mode)
 
@@ -228,8 +244,11 @@ class Passthrough(Operations):
     # File methods
     # ============
 
+
     def open(self, path, flags):
         full_path = self._full_path(path)
+        print(full_path)
+        os.chmod( full_path, stat.S_IWRITE | stat.S_IREAD )
         if full_path not in self.openedfile:
             self.openedfile.append(full_path)
             self.openedfilesize.append(os.stat(full_path).st_size)
@@ -239,7 +258,7 @@ class Passthrough(Operations):
             self.decrypted.append(full_path)
         else:
             print("File gia' decifrato")
-        return os.open(full_path, flags)
+        return os.open(full_path, os.O_RDWR, mode=0o777)
 
     def create(self, path, mode, fi=None):
         full_path = self._full_path(path)
@@ -255,19 +274,21 @@ class Passthrough(Operations):
         return os.write(fh, buf)
 
     
-    ####################################################################################
-    ####################################################################################
-    ####################################################################################
-
-    ###### GUARDARE LE RETURN ############
     
-    def truncate(self, path, length, fh=None): #metodo triggerato quando viene salvato un file
-        full_path = self._full_path(path)              
-        if not os.path.isdir(full_path) and full_path in self.openedfile: #se e' un file che 'e stato aperto gia'
-            self.encquest(full_path) #chiedi cosa deve essere cifrato
+
+    
+    def truncate(self, path, length, fh=None):
+        full_path = self._full_path(path)
+        if full_path not in self.modified:
+            self.modified.append(full_path)
+        with open(full_path, 'r+') as f:
+            f.truncate(length)
             
         
-               
+    ####################################################################################
+    ####################################################################################
+    ####################################################################################
+    #### LIMITARE LA RICHIESTRA AD UNA SOLA VOLTA QUANDO VIENE CREATO UN FILE ##########
 
     def flush(self, path, fh): #triggherato quando un file viene importato
         full_path = self._full_path(path)
@@ -278,6 +299,7 @@ class Passthrough(Operations):
             while x:
                 if s == 'Y' or s == 'y':
                     self.encrypt(full_path)
+                    Path(full_path+".enc.dec").touch()
                     x = False
                 elif s == 'n' or s == 'N':
                     print("Potrai cifrarlo al prossimo save")
