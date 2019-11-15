@@ -89,15 +89,14 @@ class Passthrough(Operations):
     
     
     def encrypt(self,path):
-        print("Sto cifrando")
-        print(path)
         if path[-8:] == ".enc.dec":
-            path = path.replace(".enc.dec","")
+            newpath = path.replace(".enc.dec","")
+        print(path)
         key = os.urandom(16)
         iv = os.urandom(16)
-        output = path+".enc"
-        public = path+".public"
-        private = path+".private"
+        output = newpath+".enc"
+        public = newpath+".public"
+        private = newpath+".private"
         with open(path,"rb") as f_opened:
             data = f_opened.read()
         print("Encrypting file %s ..." %path)
@@ -140,6 +139,7 @@ class Passthrough(Operations):
         if full_path == self.root:
             self.fillDir(full_path,mode)
         elif full_path != self.root and full_path not in self.unlockedDir and os.path.isdir(full_path):
+            print(bcolors.WARNING+"You are trying to entry in:", path +" folder" +bcolors.ENDC)
             x = True
             while(x):
                 mp = getpass()
@@ -176,8 +176,24 @@ class Passthrough(Operations):
     
     
     def destroy(self,path): #triggerato dall'unmount del filesystem 
-        print("Hai modificato i seguenti file, vuoi cifrarli?")
-        print(self.modified)
+        if self.modified:
+            print(bcolors.WARNING+"Hai modificato i seguenti file: "+bcolors.ENDC)
+            for m in self.modified: 
+                print(m)
+            x = True
+            while(x):
+                s = input(bcolors.WARNING+"Vuoi cifrarli? Y/N "+bcolors.ENDC)
+                if s == 'Y' or s == 'y':
+                    for m in self.modified:
+                        self.encrypt(m)
+                    x = False
+                elif s =='N' or s == 'n':
+                    print("I file modificati verranno eliminati")
+                    x = False
+                
+                
+                
+            
         print("[*] Unmounting filesystem under", self.mountpoint)
         for filename in Path(self.root).rglob('*.dec'): #Va a rimuovere tutti i .dec toucchati o riempiti
                 os.remove(filename)
@@ -185,8 +201,6 @@ class Passthrough(Operations):
                 
                              
     def chmod(self, path, mode):
-        print("Chmoding...")
-        print(mode)
         full_path = self._full_path(path)
         return os.chmod(full_path, mode)
 
@@ -269,14 +283,9 @@ class Passthrough(Operations):
         return os.read(fh, length)
 
     def write(self, path, buf, offset, fh):
-        print("write")
         os.lseek(fh, offset, os.SEEK_SET)
         return os.write(fh, buf)
-
-    
-    
-
-    
+        
     def truncate(self, path, length, fh=None):
         full_path = self._full_path(path)
         if full_path not in self.modified:
@@ -284,12 +293,6 @@ class Passthrough(Operations):
         with open(full_path, 'r+') as f:
             f.truncate(length)
             
-        
-    ####################################################################################
-    ####################################################################################
-    ####################################################################################
-    #### LIMITARE LA RICHIESTRA AD UNA SOLA VOLTA QUANDO VIENE CREATO UN FILE ##########
-
     def flush(self, path, fh): #triggherato quando un file viene importato
         full_path = self._full_path(path)
         if not os.path.isdir(full_path) and full_path not in self.openedfile:            
@@ -305,13 +308,9 @@ class Passthrough(Operations):
                     print("Potrai cifrarlo al prossimo save")
                     x = False
                 else:
-                    s = input("Non hai inserito correttamente. Digita Y o N! \n")
+                    s = input(bcolors.FAIL+"Non hai inserito correttamente. Digita Y o N! \n"+bcolors.ENDC)
                     x = True
-            
-    ####################################################################################
-    ####################################################################################
-    ####################################################################################
-    
+
 
     def release(self, path, fh):   
         return os.close(fh)            
@@ -324,7 +323,7 @@ class Passthrough(Operations):
     
 def main(mountpoint, root):
     pw = ''.join(open(root+".password").read().split('\n'))
-    print("Insert master password to start the mounting operation: ")
+    print(bcolors.WARNING+"Insert master password to start the mounting operation: "+bcolors.ENDC)
     masterpassword = getpass()
     mphashed = sha3.keccak_512(masterpassword.encode('utf_8')).hexdigest()
     if pw == mphashed:
