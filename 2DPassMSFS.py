@@ -91,6 +91,8 @@ class Passthrough(Operations):
     def encrypt(self,path):
         if path[-8:] == ".enc.dec":
             newpath = path.replace(".enc.dec","")
+        else:
+            newpath = path
         print(path)
         key = os.urandom(16)
         iv = os.urandom(16)
@@ -140,22 +142,10 @@ class Passthrough(Operations):
             self.fillDir(full_path,mode)
         elif full_path != self.root and full_path not in self.unlockedDir and os.path.isdir(full_path):
             print(bcolors.WARNING+"You are trying to entry in:", path +" folder" +bcolors.ENDC)
-            x = True
-            while(x):
-                mp = getpass()
-                pw = ''.join(open(self.root+".password").read().split('\n'))
-                mphashed = sha3.keccak_512(mp.encode('utf_8')).hexdigest()
-                if mphashed == pw:
-                    print(bcolors.OKGREEN+"Access to ", path+" allowed" + bcolors.ENDC)
-                    self.fillDir(full_path,mode)
-                    self.unlockedDir.append(full_path)
-                    x = False
-                else:
-                    print(bcolors.FAIL+"Access to ", path+" denied, wrong password" + bcolors.ENDC)
-                    
+            print(bcolors.OKGREEN+"Access to ", path+" allowed" + bcolors.ENDC)
+            self.fillDir(full_path,mode)
+            self.unlockedDir.append(full_path)           
                 
-                
-        
                 
     def readdir(self, path, fh): #triggerato quando si visualizza il contenuto di una directory
         full_path = self._full_path(path) #trasforma il path passato in fullpath
@@ -190,10 +180,7 @@ class Passthrough(Operations):
                 elif s =='N' or s == 'n':
                     print("I file modificati verranno eliminati")
                     x = False
-                
-                
-                
-            
+                                      
         print("[*] Unmounting filesystem under", self.mountpoint)
         for filename in Path(self.root).rglob('*.dec'): #Va a rimuovere tutti i .dec toucchati o riempiti
                 os.remove(filename)
@@ -212,8 +199,7 @@ class Passthrough(Operations):
         full_path = self._full_path(path)
         st = os.lstat(full_path)
         return dict((key, getattr(st, key)) for key in ('st_atime', 'st_ctime',
-                     'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))                         
-            
+                     'st_gid', 'st_mode', 'st_mtime', 'st_nlink', 'st_size', 'st_uid'))                               
 
     def readlink(self, path):
         pathname = os.readlink(self._full_path(path))
@@ -258,10 +244,8 @@ class Passthrough(Operations):
     # File methods
     # ============
 
-
     def open(self, path, flags):
         full_path = self._full_path(path)
-        print(full_path)
         os.chmod( full_path, stat.S_IWRITE | stat.S_IREAD )
         if full_path not in self.openedfile:
             self.openedfile.append(full_path)
@@ -270,29 +254,9 @@ class Passthrough(Operations):
         if full_path not in self.decrypted:
             self.decrypt(full_path.replace(".dec",""),full_path)
             self.decrypted.append(full_path)
-        else:
-            print("File gia' decifrato")
+        
         return os.open(full_path, os.O_RDWR, mode=0o777)
 
-    def create(self, path, mode, fi=None):
-        full_path = self._full_path(path)
-        return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
-
-    def read(self, path, length, offset, fh):
-        os.lseek(fh, offset, os.SEEK_SET)
-        return os.read(fh, length)
-
-    def write(self, path, buf, offset, fh):
-        os.lseek(fh, offset, os.SEEK_SET)
-        return os.write(fh, buf)
-        
-    def truncate(self, path, length, fh=None):
-        full_path = self._full_path(path)
-        if full_path not in self.modified:
-            self.modified.append(full_path)
-        with open(full_path, 'r+') as f:
-            f.truncate(length)
-            
     def flush(self, path, fh): #triggherato quando un file viene importato
         full_path = self._full_path(path)
         if not os.path.isdir(full_path) and full_path not in self.openedfile:            
@@ -310,7 +274,26 @@ class Passthrough(Operations):
                 else:
                     s = input(bcolors.FAIL+"Non hai inserito correttamente. Digita Y o N! \n"+bcolors.ENDC)
                     x = True
+                    
+    def truncate(self, path, length, fh=None):
+        full_path = self._full_path(path)
+        if full_path not in self.modified:
+            self.modified.append(full_path)
+        with open(full_path, 'r+') as f:
+            f.truncate(length)
+                    
+                    
+    def create(self, path, mode, fi=None):
+        full_path = self._full_path(path)
+        return os.open(full_path, os.O_WRONLY | os.O_CREAT, mode)
 
+    def read(self, path, length, offset, fh):
+        os.lseek(fh, offset, os.SEEK_SET)
+        return os.read(fh, length)
+
+    def write(self, path, buf, offset, fh):
+        os.lseek(fh, offset, os.SEEK_SET)
+        return os.write(fh, buf)
 
     def release(self, path, fh):   
         return os.close(fh)            
