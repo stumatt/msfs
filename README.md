@@ -1,1 +1,1 @@
-# teofs
+# MSFS (Mix&Slice Filesystem)
